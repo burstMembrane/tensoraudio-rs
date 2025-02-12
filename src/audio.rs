@@ -24,7 +24,7 @@ pub fn load(path: &str) -> Vec<f32> {
     }
 }
 
-fn tensor_to_vec_f32(tensor: Tensor) -> Result<Vec<f32>, tch::TchError> {
+pub fn tensor_to_vec_f32(tensor: Tensor) -> Result<Vec<f32>, tch::TchError> {
     Vec::<f32>::try_from(tensor)
 }
 
