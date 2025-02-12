@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.0.2 - 2025-02-12
+#### Bug Fixes
+- generalize to read_wav_from_stream - (4e3be6d) - Liam Power
+- add license - (747fcc7) - Liam Power
+#### Features
+- add streaming - (70cebb6) - Liam Power
+
+- - -
+
 ## 0.0.1 - 2025-02-12
 #### Bug Fixes
 - unused import in test - (70dca6a) - Liam Power
