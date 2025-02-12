@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.0.3 - 2025-02-12
+#### Miscellaneous Chores
+- fix versioning - (05b1161) - Liam Power
+
+- - -
+
 ## 0.0.2 - 2025-02-12
 #### Bug Fixes
 - generalize to read_wav_from_stream - (4e3be6d) - Liam Power
