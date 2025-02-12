@@ -3,6 +3,8 @@ name = "tensoraudio"
 description = "Reading and writing WAV files to and from tch-rs compatible tensors"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+authors = ["Liam Power <info@liampower.dev>"]
 
 [dependencies]
 anyhow = "1.0.95"
