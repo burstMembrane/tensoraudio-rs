@@ -289,13 +289,16 @@ pub fn deinterleave(data: &[f32], num_channels: usize) -> Vec<Vec<f32>> {
     channels
 }
 
+#[cfg(test)]
 mod tests {
+
     use crate::audio::{
         deinterleave, generate_random_noise, generate_sine_wave, get_audio_channels,
         get_audio_duration, get_audio_sample_rate, interleave, read_audio_file,
         read_audio_file_tensor, read_chunk, to_mono, write_audio_file, write_audio_file_tensor,
         NoiseColor,
     };
+
     use tch::Device;
 
     #[test]
