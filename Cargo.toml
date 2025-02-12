@@ -8,6 +8,7 @@ authors = ["Liam Power <info@liampower.dev>"]
 
 [dependencies]
 anyhow = "1.0.95"
+clio = { version = "0.3.5", features = ["clap-parse"] }
 hound = "3.5.1"
 log = "0.4.25"
 rand = "0.9.0"
@@ -15,3 +16,4 @@ tch = "0.19.0"
 
 [dev-dependencies]
 clap = { version = "4.5.29", features = ["derive"] }
+clio = { version = "0.3.5", features = ["clap-parse"] }
