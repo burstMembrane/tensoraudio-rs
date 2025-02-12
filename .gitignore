@@ -1,3 +1,4 @@
 /target
-testdata/
+testdata/*
+!testdata/test.wav
 libtorch/
