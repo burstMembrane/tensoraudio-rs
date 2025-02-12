@@ -17,3 +17,6 @@ setup-env:
 
 source-env:
 	. bin/${OS}-env.sh 
+
+publish:
+	. bin/${OS}-env.sh && cargo publish --allow-dirty
