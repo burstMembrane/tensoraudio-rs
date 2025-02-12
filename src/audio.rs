@@ -2,7 +2,7 @@ use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use std::convert::TryFrom;
 use tch::{Device, Kind, Tensor};
 
-pub fn read_audio_file(path: &str) -> Vec<f32> {
+pub fn load(path: &str) -> Vec<f32> {
     let mut reader = WavReader::open(path).unwrap();
     let spec = reader.spec();
 
@@ -28,29 +28,48 @@ fn tensor_to_vec_f32(tensor: Tensor) -> Result<Vec<f32>, tch::TchError> {
     Vec::<f32>::try_from(tensor)
 }
 
-pub fn write_audio_file_tensor(
-    tensor: &Tensor,
-    path: &str,
-    sample_rate: u32,
-    channels: u16,
-    sample_format: &str,
-) -> Result<(), tch::TchError> {
-    // Get dimensions
+pub fn save(path: &str, data: &[f32], sample_rate: u32, channels: u16, sample_format: &str) {
+    let sample_format = match sample_format {
+        "float" => SampleFormat::Float,
+        "int" => SampleFormat::Int,
+        _ => panic!("Invalid sample format"),
+    };
 
-    // assert that the channels are the same
-    assert_eq!(channels, tensor.size()[0] as u16);
-    let channels = tensor.size()[0] as u16;
+    let bits_per_sample = match sample_format {
+        SampleFormat::Float => 32, // Float format requires 32 bits
+        SampleFormat::Int => 16,   // Int format uses 16 bits
+    };
 
-    // First transpose to get [duration, channels], then flatten
-    let audio_data = tensor_to_vec_f32(tensor.transpose(0, 1).flatten(0, 1))?;
+    let spec = WavSpec {
+        sample_rate,
+        channels,
+        bits_per_sample,
+        sample_format,
+    };
 
-    write_audio_file(path, &audio_data, sample_rate, channels, sample_format);
-    Ok(())
+    let mut writer = WavWriter::create(path, spec).unwrap();
+
+    match sample_format {
+        SampleFormat::Float => {
+            for &sample in data {
+                writer.write_sample(sample).unwrap();
+            }
+        }
+        SampleFormat::Int => {
+            for &sample in data {
+                // Scale the float sample (-1.0 to 1.0) to i16 range
+                let scaled = (sample * i16::MAX as f32) as i16;
+                writer.write_sample(scaled).unwrap();
+            }
+        }
+    }
+
+    writer.finalize().unwrap();
 }
 
-pub fn read_audio_file_tensor(path: &str, device: Device) -> Tensor {
-    let audio_data = read_audio_file(path);
-    let channels = get_audio_channels(path) as usize;
+pub fn load_tensor(path: &str, device: Device) -> Tensor {
+    let audio_data = load(path);
+    let channels = get_channels(path) as usize;
     let samples_per_channel = audio_data.len() / channels;
 
     // Create a vector of vectors, one for each channel
@@ -69,18 +88,38 @@ pub fn read_audio_file_tensor(path: &str, device: Device) -> Tensor {
         .to(device)
 }
 
-pub fn get_audio_duration(path: &str) -> u32 {
+pub fn save_tensor(
+    tensor: &Tensor,
+    path: &str,
+    sample_rate: u32,
+    channels: u16,
+    sample_format: &str,
+) -> Result<(), tch::TchError> {
+    // Get dimensions
+
+    // assert that the channels are the same
+    assert_eq!(channels, tensor.size()[0] as u16);
+    let channels = tensor.size()[0] as u16;
+
+    // First transpose to get [duration, channels], then flatten
+    let audio_data = tensor_to_vec_f32(tensor.transpose(0, 1).flatten(0, 1))?;
+
+    save(path, &audio_data, sample_rate, channels, sample_format);
+    Ok(())
+}
+
+pub fn get_duration(path: &str) -> u32 {
     // get the duration in samples of the audio file
     let reader = WavReader::open(path).unwrap();
     reader.duration()
 }
 
-pub fn get_audio_sample_rate(path: &str) -> u32 {
+pub fn get_sample_rate(path: &str) -> u32 {
     let reader = WavReader::open(path).unwrap();
     reader.spec().sample_rate
 }
 
-pub fn get_audio_channels(path: &str) -> u16 {
+pub fn get_channels(path: &str) -> u16 {
     let reader = WavReader::open(path).unwrap();
     reader.spec().channels
 }
@@ -89,7 +128,13 @@ pub fn read_chunk(path: &str, start: usize, end: usize) -> Vec<f32> {
     let mut reader = WavReader::open(path).unwrap();
     let spec = reader.spec();
     let channels = spec.channels as usize;
-
+    let duration = get_duration(path);
+    if start > duration as usize {
+        panic!("Start is greater than the duration of the audio file");
+    }
+    if end > duration as usize {
+        panic!("End is greater than the duration of the audio file");
+    }
     // Adjust start and end to account for channels
     let start_sample = start * channels;
     let end_sample = end * channels;
@@ -120,6 +165,21 @@ pub fn read_chunk(path: &str, start: usize, end: usize) -> Vec<f32> {
         }
     };
     interleaved
+}
+
+pub fn load_chunk_tensor(path: &str, start: usize, end: usize, device: Device) -> Tensor {
+    let audio_data = read_chunk(path, start, end);
+    let channels = get_channels(path) as usize;
+    let samples_per_channel = audio_data.len() / channels;
+    let mut deinterleaved: Vec<Vec<f32>> = vec![Vec::with_capacity(samples_per_channel); channels];
+    for (i, &sample) in audio_data.iter().enumerate() {
+        let channel = i % channels;
+        deinterleaved[channel].push(sample);
+    }
+    let flat: Vec<f32> = deinterleaved.into_iter().flatten().collect();
+    Tensor::from_slice(&flat)
+        .reshape(&[channels as i64, samples_per_channel as i64])
+        .to(device)
 }
 
 pub fn generate_sine_wave(
@@ -218,51 +278,6 @@ pub fn to_mono(data: &[f32], channels: u16) -> Vec<f32> {
     mono_data
 }
 
-pub fn write_audio_file(
-    path: &str,
-    data: &[f32],
-    sample_rate: u32,
-    channels: u16,
-    sample_format: &str,
-) {
-    let sample_format = match sample_format {
-        "float" => SampleFormat::Float,
-        "int" => SampleFormat::Int,
-        _ => panic!("Invalid sample format"),
-    };
-
-    let bits_per_sample = match sample_format {
-        SampleFormat::Float => 32, // Float format requires 32 bits
-        SampleFormat::Int => 16,   // Int format uses 16 bits
-    };
-
-    let spec = WavSpec {
-        sample_rate,
-        channels,
-        bits_per_sample,
-        sample_format,
-    };
-
-    let mut writer = WavWriter::create(path, spec).unwrap();
-
-    match sample_format {
-        SampleFormat::Float => {
-            for &sample in data {
-                writer.write_sample(sample).unwrap();
-            }
-        }
-        SampleFormat::Int => {
-            for &sample in data {
-                // Scale the float sample (-1.0 to 1.0) to i16 range
-                let scaled = (sample * i16::MAX as f32) as i16;
-                writer.write_sample(scaled).unwrap();
-            }
-        }
-    }
-
-    writer.finalize().unwrap();
-}
-
 pub fn interleave(channels: &[Vec<f32>]) -> Vec<f32> {
     let samples_per_channel = channels[0].len();
     let num_channels = channels.len();
@@ -292,33 +307,28 @@ pub fn deinterleave(data: &[f32], num_channels: usize) -> Vec<Vec<f32>> {
 #[cfg(test)]
 mod tests {
 
-    use crate::audio::{
-        deinterleave, generate_random_noise, generate_sine_wave, get_audio_channels,
-        get_audio_duration, get_audio_sample_rate, interleave, read_audio_file,
-        read_audio_file_tensor, read_chunk, to_mono, write_audio_file, write_audio_file_tensor,
-        NoiseColor,
-    };
+    use crate::audio::*;
 
     use tch::Device;
 
     #[test]
-    fn test_read_audio_file() {
-        let audio_data = read_audio_file("testdata/test.wav");
-        let duration = get_audio_duration("testdata/test.wav");
-        let channels = get_audio_channels("testdata/test.wav");
+    fn test_load() {
+        let audio_data = load("testdata/test.wav");
+        let duration = get_duration("testdata/test.wav");
+        let channels = get_channels("testdata/test.wav");
 
         // audio data should be the duration * channels
         assert_eq!(audio_data.len() / channels as usize, duration as usize);
     }
 
     #[test]
-    fn test_get_audio_sample_rate() {
-        let sample_rate = get_audio_sample_rate("testdata/test.wav");
+    fn test_get_sample_rate() {
+        let sample_rate = get_sample_rate("testdata/test.wav");
         assert_eq!(sample_rate, 44100);
     }
     #[test]
-    fn test_get_audio_channels() {
-        let channels = get_audio_channels("testdata/test.wav");
+    fn test_get_channels() {
+        let channels = get_channels("testdata/test.wav");
         assert_eq!(channels, 2);
     }
     #[test]
@@ -327,10 +337,10 @@ mod tests {
         assert_eq!(audio_data.len(), 2000);
     }
     #[test]
-    fn test_write_audio_file() {
-        let audio_data = read_audio_file("testdata/test.wav");
+    fn test_save() {
+        let audio_data = load("testdata/test.wav");
 
-        write_audio_file("testdata/test_write.wav", &audio_data, 44100, 2, "int");
+        save("testdata/test_write.wav", &audio_data, 44100, 2, "int");
     }
 
     #[test]
@@ -342,7 +352,7 @@ mod tests {
     #[test]
     fn test_write_chunk() {
         let audio_data = read_chunk("testdata/test.wav", 0, 441000);
-        write_audio_file(
+        save(
             "testdata/test_chunk_write.wav",
             &audio_data,
             44100,
@@ -352,22 +362,22 @@ mod tests {
     }
 
     #[test]
-    fn test_read_audio_file_tensor() {
-        let tensor = read_audio_file_tensor("testdata/test.wav", Device::Cpu);
-        let duration = get_audio_duration("testdata/test.wav");
-        let channels = get_audio_channels("testdata/test.wav");
+    fn test_load_tensor() {
+        let tensor = load_tensor("testdata/test.wav", Device::Cpu);
+        let duration = get_duration("testdata/test.wav");
+        let channels = get_channels("testdata/test.wav");
         assert_eq!(tensor.size()[0], channels as i64);
         assert_eq!(tensor.size()[1], duration as i64);
     }
 
     #[test]
     fn test_tensor_to_audio_file() -> Result<(), tch::TchError> {
-        let tensor = read_audio_file_tensor("testdata/test.wav", Device::Cpu);
-        write_audio_file_tensor(&tensor, "testdata/tensor.wav", 44100, 2 as u16, "int")?;
+        let tensor = load_tensor("testdata/test.wav", Device::Cpu);
+        save_tensor(&tensor, "testdata/tensor.wav", 44100, 2 as u16, "int")?;
 
         // Verify the output
-        let original = read_audio_file("testdata/test.wav");
-        let written = read_audio_file("testdata/tensor.wav");
+        let original = load("testdata/test.wav");
+        let written = load("testdata/tensor.wav");
 
         assert_eq!(original.len(), written.len());
 
@@ -381,25 +391,25 @@ mod tests {
     #[test]
     fn test_generate_sine_wave() {
         let audio_data = generate_sine_wave(60.0, 1, 44100, 2);
-        write_audio_file("testdata/sine.wav", &audio_data, 44100, 2, "int");
+        save("testdata/sine.wav", &audio_data, 44100, 2, "int");
     }
 
     #[test]
     fn test_generate_random_noise() {
         // Test white noise
         let white_noise = generate_random_noise(1, 44100, 2, NoiseColor::White);
-        write_audio_file("testdata/white_noise.wav", &white_noise, 44100, 2, "int");
+        save("testdata/white_noise.wav", &white_noise, 44100, 2, "int");
 
         // Test pink noise
         let pink_noise = generate_random_noise(1, 44100, 2, NoiseColor::Pink);
-        write_audio_file("testdata/pink_noise.wav", &pink_noise, 44100, 2, "int");
+        save("testdata/pink_noise.wav", &pink_noise, 44100, 2, "int");
     }
 
     #[test]
     fn test_to_mono() {
-        let audio_data = read_audio_file("testdata/test.wav");
+        let audio_data = load("testdata/test.wav");
         let mono_data = to_mono(&audio_data, 2);
-        write_audio_file("testdata/mono.wav", &mono_data, 44100, 1, "int");
+        save("testdata/mono.wav", &mono_data, 44100, 1, "int");
     }
 
     #[test]
@@ -421,5 +431,12 @@ mod tests {
         // Test round trip
         let round_trip = interleave(&deinterleave(&interleaved, 2));
         assert_eq!(round_trip, interleaved);
+    }
+
+    #[test]
+    fn test_load_chunk_tensor() {
+        let tensor = load_chunk_tensor("testdata/test.wav", 0, 1000, Device::Cpu);
+        assert_eq!(tensor.size()[0], 2);
+        assert_eq!(tensor.size()[1], 1000);
     }
 }

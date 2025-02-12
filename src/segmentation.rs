@@ -6,7 +6,7 @@ use tch::kind::Kind;
 use tch::Tensor;
 
 // //FIX: this errors out sometimes with smaller segments and long audio files
-pub fn segment_audio(
+pub fn split(
     audio: &Tensor,
     segment_length: i64,
     overlap_seconds: f32,
@@ -71,7 +71,7 @@ pub fn segment_audio(
     Ok((output, padding))
 }
 
-pub fn desegment_audio(
+pub fn merge(
     segments: &Tensor,
     segment_length: i64,
     overlap_seconds: f32,
@@ -161,28 +161,27 @@ pub fn desegment_audio(
 #[allow(unused_imports)]
 mod tests {
     use crate::audio::{
-        generate_random_noise, get_audio_channels, get_audio_duration, get_audio_sample_rate,
-        read_audio_file_tensor, write_audio_file_tensor, NoiseColor,
+        generate_random_noise, get_channels, get_duration, get_sample_rate, load_tensor,
+        save_tensor, NoiseColor,
     };
-    use crate::segmentation::{desegment_audio, segment_audio};
-
+    use crate::segmentation::{merge, split};
     use std::path::PathBuf;
     use tch::{Device, Tensor};
 
     #[test]
-    fn test_segment_audio_with_overlap() {
+    fn test_split_audio_with_overlap() {
         let test_path = PathBuf::from("testdata/test.wav");
         let test_path_str = test_path.to_str().unwrap();
 
         // Read the test audio file
-        let tensor = read_audio_file_tensor(test_path_str, Device::Cpu);
-        let sample_rate = get_audio_sample_rate(test_path_str) as i64; // Convert to i64
+        let tensor = load_tensor(test_path_str, Device::Cpu);
+        let sample_rate = get_sample_rate(test_path_str) as i64;
 
         let segment_length = 1;
         let overlap_seconds = 0.1;
         let fade_type = "linear";
 
-        let (result, _) = segment_audio(
+        let (result, _) = split(
             &tensor,
             segment_length,
             overlap_seconds,
@@ -209,19 +208,18 @@ mod tests {
     }
 
     #[test]
-    fn test_desegment_audio() {
+    fn test_merge_audio() {
         let test_path = PathBuf::from("testdata/test.wav");
         let test_path_str = test_path.to_str().unwrap();
 
-        // Read the test audio file
-        let tensor = read_audio_file_tensor(test_path_str, Device::Cpu);
-        let sample_rate = get_audio_sample_rate(test_path_str);
+        let tensor = load_tensor(test_path_str, Device::Cpu);
+        let sample_rate = get_sample_rate(test_path_str);
 
         let segment_length = 1;
         let overlap_seconds = 0.1;
         let fade_type = "linear";
 
-        let (segments, padding) = segment_audio(
+        let (segments, padding) = split(
             &tensor,
             segment_length,
             overlap_seconds,
@@ -229,7 +227,7 @@ mod tests {
             sample_rate,
         )
         .unwrap();
-        let result = desegment_audio(
+        let result = merge(
             &segments,
             segment_length,
             overlap_seconds,
@@ -246,16 +244,16 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_reconstruct_audio() {
+    fn test_split_merge_audio() {
         let test_path = PathBuf::from("testdata/test.wav");
         let test_path_str = test_path.to_str().unwrap();
-        let audio = read_audio_file_tensor(test_path_str, Device::Cpu);
-        let sample_rate = get_audio_sample_rate(test_path_str);
+        let audio = load_tensor(test_path_str, Device::Cpu);
+        let sample_rate = get_sample_rate(test_path_str);
 
         let segment_length = 1;
         let overlap_seconds = 0.1;
         let fade_type = "linear";
-        let (segments, padding) = segment_audio(
+        let (segments, padding) = split(
             &audio,
             segment_length,
             overlap_seconds,
@@ -264,7 +262,7 @@ mod tests {
         )
         .unwrap();
 
-        let reconstructed_audio = desegment_audio(
+        let reconstructed_audio = merge(
             &segments,
             segment_length,
             overlap_seconds,
@@ -277,7 +275,7 @@ mod tests {
         let output_path = PathBuf::from("testdata/reconstructed.wav");
         assert!(reconstructed_audio.size() == audio.size());
 
-        let _ = write_audio_file_tensor(
+        let _ = save_tensor(
             &reconstructed_audio,
             output_path.to_str().unwrap(),
             sample_rate,
