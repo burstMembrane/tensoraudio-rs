@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.0.4 - 2025-02-12
+#### Features
+- add split and merge by samples as well as seconds - (9c44031) - Liam Power
+- add merge_batch - (8f20b4b) - Liam Power
+#### Miscellaneous Chores
+- bump version - (3ed7024) - Liam Power
+
+- - -
+
 ## 0.0.3 - 2025-02-12
 #### Miscellaneous Chores
 - fix versioning - (05b1161) - Liam Power
