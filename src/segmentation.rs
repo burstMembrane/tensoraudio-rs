@@ -158,13 +158,97 @@ pub fn merge(
     Ok(final_output)
 }
 
+pub fn merge_batch(
+    segments: &Tensor,
+    segment_samples: i64,
+    overlap_seconds: f32,
+    padding: i64,
+    fade_type: &str,
+    sample_rate: u32,
+    batch_size: i64,
+) -> Result<Tensor> {
+    debug!("Desegmenting audio");
+    let num_segments = segments.size()[0];
+    let channels = segments.size()[1];
+    let overlap_length = (overlap_seconds * sample_rate as f32) as i64;
+
+    let step_size = segment_samples - overlap_length;
+    let total_padded = (num_segments - 1) * step_size + segment_samples;
+    let total_length = total_padded - padding;
+
+    let output = Tensor::zeros(&[channels, total_padded], (Kind::Float, segments.device()));
+    let weights = Tensor::zeros(&[total_padded], (Kind::Float, segments.device()));
+
+    let fade = Fade::new(overlap_length / 2, overlap_length / 2, fade_type);
+
+    // Precompute the faded weights (tensor of ones after fade)
+    let weights_fade = fade
+        .forward(&Tensor::ones(
+            &[1, segment_samples],
+            (Kind::Float, segments.device()),
+        ))
+        .squeeze();
+
+    // Process segments in batches
+    for batch_start in (0..num_segments).step_by(batch_size as usize) {
+        let batch_end = (batch_start + batch_size).min(num_segments);
+        let batch = segments.slice(0, batch_start, batch_end, 1);
+
+        for (i, idx) in (batch_start..batch_end).enumerate() {
+            let start_idx = idx * step_size;
+            let end_idx = start_idx + segment_samples;
+
+            let segment = batch.select(0, i as i64);
+            let segment = if segment.dim() == 1 {
+                segment.unsqueeze(0)
+            } else {
+                segment
+            };
+            let mut faded_segment = fade.forward(&segment);
+
+            let mut output_segment = output.slice(1, start_idx, end_idx, 1);
+            if output_segment.dim() == 1 {
+                output_segment = output_segment.unsqueeze(0);
+            }
+
+            let faded_len = faded_segment.size()[1];
+            let output_len = output_segment.size()[1];
+            if faded_len < output_len {
+                let pad_len = output_len - faded_len;
+                faded_segment = faded_segment.unsqueeze(0);
+                faded_segment = faded_segment.zero_pad1d(0, pad_len);
+                faded_segment = faded_segment.squeeze();
+            }
+
+            let _ = output_segment.f_add_(&faded_segment)?;
+            let mut weights_segment = weights.slice(0, start_idx, end_idx, 1);
+            let _ = weights_segment.f_add_(&weights_fade)?;
+        }
+    }
+
+    let normalized = output / weights.unsqueeze(0);
+
+    let final_output = if padding > 0 {
+        normalized.slice(1, 0, total_length, 1)
+    } else {
+        normalized
+    };
+
+    let final_output = if final_output.dim() == 1 {
+        final_output.unsqueeze(0)
+    } else {
+        final_output
+    };
+
+    Ok(final_output)
+}
 #[allow(unused_imports)]
 mod tests {
     use crate::audio::{
         generate_random_noise, get_channels, get_duration, get_sample_rate, load_tensor,
         save_tensor, NoiseColor,
     };
-    use crate::segmentation::{merge, split};
+    use crate::segmentation::{merge, merge_batch, split};
     use std::path::PathBuf;
     use tch::{Device, Tensor};
 
@@ -283,4 +367,30 @@ mod tests {
             "int",
         );
     }
+
+    // #[test]
+    // fn test_merge_batch_audio() {
+    //     let test_path = PathBuf::from("testdata/test.wav");
+    //     let test_path_str = test_path.to_str().unwrap();
+
+    //     let tensor = load_tensor(test_path_str, Device::Cpu);
+
+    //     let sample_rate = get_sample_rate(test_path_str);
+    //     let batch_size = 1;
+    //     // add batch dimension
+    //     //    segment the audio
+    //     let (segments, padding) = split(&tensor, 1, 0.1, "linear", sample_rate).unwrap();
+    //     // add batch dimension
+    //     let segments = segments.unsqueeze(0);
+    //     dbg!(&segments.size());
+    //     let result = merge_batch(&segments, 1, 0.1, 0, "linear", sample_rate, batch_size).unwrap();
+    //     let output_path = PathBuf::from("testdata/reconstructed_batch.wav");
+    //     let _ = save_tensor(
+    //         &result,
+    //         output_path.to_str().unwrap(),
+    //         sample_rate,
+    //         2,
+    //         "int",
+    //     );
+    // }
 }
