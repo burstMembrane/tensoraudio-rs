@@ -1,0 +1,2 @@
+# File: cog.toml
+pre_bump_hooks = ["echo {{version}}", "cargo bump {{version}}"]
